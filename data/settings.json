@@ -1,0 +1,6 @@
+{
+	"match_score":1,
+	"mismatch_score":1,
+	"gap_opening_score":7,
+	"gap_extension_score":1
+}
