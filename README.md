@@ -3,6 +3,23 @@
 
  At this moment, the program is applicable in Unix based systems. All the codes are written in Python (3.7.13). By default, the data directory contains seetings.json with the corresponding LASTAL settings; and organism_names.txt file with the organism names.
 
+The content of settings.json file (default settings of lastal:
+---
+```json
+{
+	"match_score":1,
+	"mismatch_score":1,
+	"gap_opening_score":7,
+	"gap_extension_score":1
+}
+```
+
+The organism_names.txt file contains the organism names line by line, all lowercase without comma as the following:
+```bash
+mus musculus
+homo sapiens
+```
+
  Setting up the environment:
 ---
 ```bash
@@ -25,7 +42,7 @@ mtID=run(
 		)
 ```
 
-Used Python packages and external programs (if the module is not built in, the version number and conda installation are provided):
+Used Python packages (if the module is not built in, the version number and conda installation are provided):
 ---
 - os
 - json
