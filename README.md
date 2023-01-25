@@ -1,5 +1,7 @@
 # NUMT_finder
- Application for finding NUMTs in NCBI genomes.
+ Application for finding NUMTs in NCBI reference genomes.
+
+ At this moment, the program is applicable in Unix based systems. All the codes are written in Python (3.7.13). By default, the data directory contains seetings.json with the corresponding LASTAL settings; and organism_names.txt file with the organism names.
 
  Setting up the environment:
 ---
