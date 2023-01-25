@@ -19,8 +19,9 @@ from subprocess import call, run
 
 call(f'gzip -d ../data/gDNA.fna.gz',shell=True)
 mtID=run(
-			f"""egrep '{self.organism_name.replace('_',' ').capitalize()}' ../data/mitochondrion.1.1.genomic.fna | grep mitochondrion""",
-			shell=True,capture_output=True
+		f"""egrep '{self.organism_name.replace('_',' ').capitalize()}'
+		../data/mitochondrion.1.1.genomic.fna | grep mitochondrion""",
+		shell=True,capture_output=True
 		)
 ```
 
