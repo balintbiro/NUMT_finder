@@ -1,6 +1,5 @@
 #import dependencies
 import os
-import re
 import json
 import numpy as np
 import pandas as pd
@@ -34,10 +33,9 @@ with open('../data/settings.json')as infile:
 lastal_settings=json.loads(lastal_settings)
 
 #class definition for processing DNA
-class get_genomes():
+class NUMT_finder():
 	def __init__(self, organism_name):
 		self.organism_name=str(organism_name)
-		self.current_assembly=''
 
 	def get_mtDNA(self):
 		try:
@@ -69,10 +67,10 @@ class get_genomes():
 				ftp_path=assembly_summary.loc[
 					assembly_summary['organism_name']==self.organism_name.replace('_',' ').capitalize()
 				]['ftp_path'].tolist()[0]
-				self.current_assembly=ftp_path.split('/')[-1]
+				current_assembly=ftp_path.split('/')[-1]
 				#download latest assembly genome
 				call(
-						f'wget --output-document=../data/gDNA.fna.gz {ftp_path}/{self.current_assembly}_genomic.fna.gz',
+						f'wget --output-document=../data/gDNA.fna.gz {ftp_path}/{current_assembly}_genomic.fna.gz',
 						shell=True
 					)
 				#decompress gDNA
@@ -82,7 +80,7 @@ class get_genomes():
 
 	def LASTALignment(self):
 		try:
-			if os.path.getsize('../data/mtDNA.fna')>100:
+			if (os.path.getsize('../data/mtDNA.fna')>100):
 				#generate LASTAL db
 				call(
 						'lastdb ../data/db ../data/gDNA.fna',
@@ -90,39 +88,84 @@ class get_genomes():
 					)
 				#align gDNA with mtDNA
 				call(
-						f"""lastal -r{lastal_settings['match_score']}
-						-q{lastal_settings['mismatch_score']}
-						-a{lastal_settings['gap_opening_score']}
-						-b{lastal_settings['gap_extension_score']}
-						../data/db ../data/dmtDNA.fna  > ../data/aligned_dmtDNA.afa""",
+						f"""lastal -r{lastal_settings['match_score']} -q{lastal_settings['mismatch_score']} -a{lastal_settings['gap_opening_score']} -b{lastal_settings['gap_extension_score']} ../data/db ../data/dmtDNA.fna  > ../data/aligned_dmtDNA.afa""",
 						shell=True
 					)
-				#remove unnecessary file
-				call("""rm !('../data/mitochondrion.1.1.genomic.fna'|'../data/assembly_summary_refseq.txt|../data/organism_names.txt'|'../data/settings.json')""",shell=True)
 			else:
 				print(f'A problem occured during {self.organism_name} db building or alignment!')
 		except:
 			print(f'A problem occured during {self.organism_name} db building or alignment!')
 
+	def process_alignment(self):
+		try:
+			df_input=[]
+			#get data from alignment file
+			with open('../data//aligned_dmtDNA.afa')as infile:
+				content=infile.readlines()
+				for index, line in enumerate(content):
+					if 'score' in line:
+						#general information
+						score,eg2_value,e_value=int(line.rsplit()[1].split('=')[1]),float(line.rsplit()[2].split('=')[1]),float(line.rsplit()[3].split('=')[1])
+						#genomic information
+						genomic=content[index + 1]
+						genomic_id,genomic_start,genomic_length,genomic_strand,genomic_size,genomic_sequence=genomic.rsplit()[1],int(genomic.rsplit()[2]),int(genomic.rsplit()[3]),genomic.rsplit()[4],int(genomic.rsplit()[5]),genomic.rsplit()[6]
+						#mitochondrial information
+						mitochondrial=content[index + 2]
+						mitochondrial_start,mitochondrial_length,mitochondrial_strand,mitochondrial_sequence = int(mitochondrial.rsplit()[2]),int(mitochondrial.rsplit()[3]),mitochondrial.rsplit()[4],mitochondrial.rsplit()[6]
+						df_input.append([
+								score, eg2_value, e_value, genomic_id, genomic_start,mitochondrial_start,
+								genomic_length, mitochondrial_length, genomic_strand,mitochondrial_strand,
+								genomic_size, genomic_sequence,mitochondrial_sequence
+							])
+			#create df from alignment info
+			alignments=pd.DataFrame(
+					data=df_input,
+					columns=[
+						'score', 'eg2_value', 'e_value', 'genomic_id', 'genomic_start',
+						'mitochondrial_start', 'genomic_length', 'mitochondrial_length', 'genomic_strand',
+						'mitochondrial_strand', 'genomic_size', 'genomic_sequence',
+						'mitochondrial_sequence'
+					]
+				)
+			#create filter to discard artifacts that are the results of using double mtDNA
+			mtRecord=SeqIO.read("../data/mtDNA.fna", "fasta")
+			mtSize=len(str(mtRecord.seq))
+			size_fil=alignments['mitochondrial_start']<mtSize
+			#get current assembly for filename
+			#get latest assembly
+			ftp_path=assembly_summary.loc[
+				assembly_summary['organism_name']==self.organism_name.replace('_',' ').capitalize()
+			]['ftp_path'].tolist()[0]
+			current_assembly=ftp_path.split('/')[-1]
+			#apply filters and write output into results folder
+			alignments=alignments[size_fil]
+			alignments.to_csv(f'../results/{self.organism_name}_{current_assembly}_numts.csv',header=True)
+			#remove unnecessary file
+			call("""rm ../data/* !('mitochondrion.1.1.genomic.fna'|'assembly_summary_refseq.txt'|'organism_names.txt'|'settings.json')""",shell=True)
+		except:
+			print(f'A problem occured during {self.organism_name} alignment processing!')
+
 #download mitochondrial file
-if os.path.exists('../data/mitochondrion.1.1.genomic.fna')==False:#uncompressed file
+if os.path.exists('../data/mitochondrion.1.1.genomic.fna')==False:
 	call(
 			f'wget --directory-prefix=../data/ https://ftp.ncbi.nlm.nih.gov/genomes/refseq/mitochondrion/mitochondrion.1.1.genomic.fna.gz',
 			shell=True
 		)
 	call(
-			f'gzip -d ../data/{filename}',
+			f'gzip -d ../data/mitochondrion.1.1.genomic.fna.gz',
 			shell=True
 		)
 
 if organism_names.size>1:
 	for organism_name in organism_names:
-		NUMT_class=get_genomes(organism_name)
+		NUMT_class=NUMT_finder(organism_name)
 		NUMT_class.get_mtDNA()
 		NUMT_class.get_gDNA()
 		NUMT_class.LASTALignment()
+		NUMT_class.process_alignment()
 else:
-	NUMT_class=get_genomes(organism_names)
+	NUMT_class=NUMT_finder(organism_names)
 	NUMT_class.get_mtDNA()
 	NUMT_class.get_gDNA()
 	NUMT_class.LASTALignment()
+	NUMT_class.process_alignment()
