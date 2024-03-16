@@ -1,6 +1,20 @@
 # NUMT_finder
  Application for finding NUMTs in NCBI reference genomes.
 
+ # Upon usage, please cite
+ ´´´bibtex
+ @article{biro2024mitochondrial,
+  title={Mitochondrial genome plasticity of mammalian species},
+  author={Bir{\'o}, B{\'a}lint and G{\'a}l, Zolt{\'a}n and Fekete, Zs{\'o}fia and Klecska, Eszter and Hoffmann, Orsolya Ivett},
+  journal={BMC Genomics},
+  volume={25},
+  number={1},
+  pages={1--14},
+  year={2024},
+  publisher={BioMed Central}
+}
+ ´´´
+
  # Abstract
 There is an ongoing process in which mitochondrial sequences are being integrated into the nuclear genome. The importance of these sequences has already been revealed in cancer biology, forensic, phylogenetic studies and in the evolution of the eukaryotic genetic information. Human and numerous model organisms’ genomes were described from those sequences point of view. Furthermore, recent studies were published on the patterns of these nuclear localised mitochondrial sequences in different taxa.
 
