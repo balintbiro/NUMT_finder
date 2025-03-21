@@ -50,3 +50,9 @@ homo sapiens
 ```bash
 conda env create -f NUMT_finder.yml
 ```
+
+Example usage:
+---
+```bash
+python code/NUMT_finder.py --org-path data/organism_names.txt --out-path data/
+```
