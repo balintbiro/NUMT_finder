@@ -1,23 +1,70 @@
 #import dependencies
 import os
+import time
 import json
+import logging
+import argparse
 import numpy as np
 import pandas as pd
 from Bio import SeqIO
 from ftplib import FTP
 from subprocess import call, run
+from argparse import RawTextHelpFormatter
+
+from NUMT_finder_class import NUMT_finder
+
+logging.basicConfig(level=logging.INFO)
+logger=logging.getLogger(__name__)
+
+#initialize the argument parser object
+parser=argparse.ArgumentParser(
+		formatter_class=RawTextHelpFormatter,
+		epilog="""
+		Description:
+		CLI application for mining NUclear MiTochondrial sequences (NUMTs) from mammalian reference genomes.
+
+		Example usage:
+		python code/NUMT_finder.py --org-path data/organism_names.txt --out-path data/
+		"""
+	)
+
+parser.add_argument("--org-path",required=True,help="Path to the txt file containing organism names")
+parser.add_argument("--out-path",required=True,help="Path to the output files")
+
+#parse arguments
+args=parser.parse_args()
+
+#setup log environment
+log_file=f"{args.out_path}NUMT_finder.log"
+file_handler=logging.FileHandler(log_file)
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(file_handler)
+
+logger.info("Starting NUMT mining")
+start_time=time.time()
 
 #get organism names
-organism_names=np.loadtxt('../data/organism_names.txt',dtype=str,delimiter='\n')
+logger.info("Reading organism names")
+organism_names=np.loadtxt(args.org_path,dtype=str,delimiter='\n')
+if organism_names.size==1:
+	logger.info(f"Mining is running for 1 organism")
+else:
+	logger.info(f"Mining is running for {len(organism_names)} organisms")
 
 #get assembly summary file
-if os.path.exists('../data/assembly_summary_refseq.txt')==False:
+if os.path.exists(f'{args.out_path}assembly_summary_refseq.txt')==False:
+	logger.info(f"Downloading assembly summary to {args.out_path}assembly_summary_refseq.txt")
 	ftp_site='https://ftp.ncbi.nlm.nih.gov/genomes/refseq/'
 	filename='assembly_summary_refseq.txt'
-	call(f'wget --directory-prefix=../data/ {ftp_site}{filename}',shell=True)
+	call(f'wget --directory-prefix={args.out_path} {ftp_site}{filename} -q',shell=True)
+	logger.info(f"{args.out_path}assembly_summary_refseq.txt has been successfully downloaded")
 
 #read assembly summary file
-assembly_summary=pd.read_csv('../data/assembly_summary_refseq.txt',sep='\t',skiprows=1)
+assembly_summary=pd.read_csv(
+		f'{args.out_path}assembly_summary_refseq.txt',
+		usecols=["organism_name","ftp_path","assembly_level"],
+		sep='\t',skiprows=1
+	)
 
 #sort assembly summary df based on genome quality
 assembly_qualities=['Complete Genome','Chromosome','Scaffold','Contig']
@@ -28,144 +75,52 @@ assembly_summary['assembly_quality']=pd.Categorical(
 assembly_summary=assembly_summary.sort_values(by=['assembly_quality'])
 
 #read LASTAL setting .json file
-with open('../data/settings.json')as infile:
+with open('settings.json')as infile:
 	lastal_settings=infile.read()
 lastal_settings=json.loads(lastal_settings)
 
-#class definition for processing DNA
-class NUMT_finder():
-	def __init__(self, organism_name):
-		self.organism_name=str(organism_name)
-
-	def get_mtDNA(self):
-		try:
-			#get mitochondrial id
-			mtID=run(
-					f"""egrep '{self.organism_name.replace('_',' ').capitalize()}' ../data/mitochondrion.1.1.genomic.fna | grep mitochondrion""",
-					shell=True,capture_output=True
-				)
-			mtID=str(mtID.stdout).split()[0][3:]
-			#get mitochondrial sequence
-			call(
-					f'samtools faidx ../data/mitochondrion.1.1.genomic.fna {mtID} > ../data/mtDNA.fna',
-					shell=True
-				)
-			#get duplicated mitochondria
-			mtRecord=SeqIO.read("../data/mtDNA.fna", "fasta")
-			mtSeq=str(mtRecord.seq)
-			with open('../data/dmtDNA.fna','w')as outfile:
-				outfile.write('>'+str(mtID)+'\n'+2*mtSeq)
-		except:
-			print(f'A problem occured during {self.organism_name} mtDNA acquisition!')
-
-	def get_gDNA(self):
-		try:
-			if os.path.exists('../data/mtDNA.fna')==False:
-				print(f'No mtDNA sequence was found for {self.organism_name}!')
-			elif os.path.exists('../data/gDNA.fna')==False:
-				#get latest assembly
-				ftp_path=assembly_summary.loc[
-					assembly_summary['organism_name']==self.organism_name.replace('_',' ').capitalize()
-				]['ftp_path'].tolist()[0]
-				current_assembly=ftp_path.split('/')[-1]
-				#download latest assembly genome
-				call(
-						f'wget --output-document=../data/gDNA.fna.gz {ftp_path}/{current_assembly}_genomic.fna.gz',
-						shell=True
-					)
-				#decompress gDNA
-				call(f'gzip -d ../data/gDNA.fna.gz',shell=True)
-		except:
-			print(f'A problem occured during {self.organism_name} gDNA acquisition!')
-
-	def LASTALignment(self):
-		try:
-			if (os.path.getsize('../data/mtDNA.fna')>100):
-				#generate LASTAL db
-				call(
-						'lastdb ../data/db ../data/gDNA.fna',
-						shell=True
-					)
-				#align gDNA with mtDNA
-				call(
-						f"""lastal -r{lastal_settings['match_score']} -q{lastal_settings['mismatch_score']} -a{lastal_settings['gap_opening_score']} -b{lastal_settings['gap_extension_score']} ../data/db ../data/dmtDNA.fna  > ../data/aligned_dmtDNA.afa""",
-						shell=True
-					)
-			else:
-				print(f'A problem occured during {self.organism_name} db building or alignment!')
-		except:
-			print(f'A problem occured during {self.organism_name} db building or alignment!')
-
-	def process_alignment(self):
-		try:
-			df_input=[]
-			#get data from alignment file
-			with open('../data//aligned_dmtDNA.afa')as infile:
-				content=infile.readlines()
-				for index, line in enumerate(content):
-					if 'score' in line:
-						#general information
-						score,eg2_value,e_value=int(line.rsplit()[1].split('=')[1]),float(line.rsplit()[2].split('=')[1]),float(line.rsplit()[3].split('=')[1])
-						#genomic information
-						genomic=content[index + 1]
-						genomic_id,genomic_start,genomic_length,genomic_strand,genomic_size,genomic_sequence=genomic.rsplit()[1],int(genomic.rsplit()[2]),int(genomic.rsplit()[3]),genomic.rsplit()[4],int(genomic.rsplit()[5]),genomic.rsplit()[6]
-						#mitochondrial information
-						mitochondrial=content[index + 2]
-						mitochondrial_start,mitochondrial_length,mitochondrial_strand,mitochondrial_sequence = int(mitochondrial.rsplit()[2]),int(mitochondrial.rsplit()[3]),mitochondrial.rsplit()[4],mitochondrial.rsplit()[6]
-						df_input.append([
-								score, eg2_value, e_value, genomic_id, genomic_start,mitochondrial_start,
-								genomic_length, mitochondrial_length, genomic_strand,mitochondrial_strand,
-								genomic_size, genomic_sequence,mitochondrial_sequence
-							])
-			#create df from alignment info
-			alignments=pd.DataFrame(
-					data=df_input,
-					columns=[
-						'score', 'eg2_value', 'e_value', 'genomic_id', 'genomic_start',
-						'mitochondrial_start', 'genomic_length', 'mitochondrial_length', 'genomic_strand',
-						'mitochondrial_strand', 'genomic_size', 'genomic_sequence',
-						'mitochondrial_sequence'
-					]
-				)
-			#create filter to discard artifacts that are the results of using double mtDNA
-			mtRecord=SeqIO.read("../data/mtDNA.fna", "fasta")
-			mtSize=len(str(mtRecord.seq))
-			size_fil=alignments['mitochondrial_start']<mtSize
-			#get current assembly for filename
-			#get latest assembly
-			ftp_path=assembly_summary.loc[
-				assembly_summary['organism_name']==self.organism_name.replace('_',' ').capitalize()
-			]['ftp_path'].tolist()[0]
-			current_assembly=ftp_path.split('/')[-1]
-			#apply filters and write output into results folder
-			alignments=alignments[size_fil]
-			alignments.to_csv(f'../results/{self.organism_name}_{current_assembly}_numts.csv',header=True)
-			#remove unnecessary file
-			call("""rm ../data/* !('mitochondrion.1.1.genomic.fna'|'assembly_summary_refseq.txt'|'organism_names.txt'|'settings.json')""",shell=True)
-		except:
-			print(f'A problem occured during {self.organism_name} alignment processing!')
-
 #download mitochondrial file
-if os.path.exists('../data/mitochondrion.1.1.genomic.fna')==False:
+if os.path.exists(f'{args.out_path}mitochondrion.1.1.genomic.fna')==False:
+	logger.info(f"Downloading and uncompressing mitochondrial genome file to {args.out_path}mitochondrion.1.1.genomic.fna")
 	call(
-			f'wget --directory-prefix=../data/ https://ftp.ncbi.nlm.nih.gov/genomes/refseq/mitochondrion/mitochondrion.1.1.genomic.fna.gz',
+			f'wget --directory-prefix={args.out_path} https://ftp.ncbi.nlm.nih.gov/genomes/refseq/mitochondrion/mitochondrion.1.1.genomic.fna.gz -q',
 			shell=True
 		)
 	call(
-			f'gzip -d ../data/mitochondrion.1.1.genomic.fna.gz',
+			f'gzip -d {args.out_path}mitochondrion.1.1.genomic.fna.gz',
 			shell=True
 		)
+	logger.info(f"{args.out_path}mitochondrion.1.1.genomic.fna has been successfully downloaded and uncompressed")
 
-if organism_names.size>1:
-	for organism_name in organism_names:
-		NUMT_class=NUMT_finder(organism_name)
+def main()->None:
+	if organism_names.size>1:
+		for organism_name in organism_names:
+			NUMT_class=NUMT_finder(organism_name=organism_name,out_path=args.out_path,settings=lastal_settings,assembly_summary=assembly_summary)
+			logger.info(f"mtDNA is being downloaded for {organism_name}")
+			NUMT_class.get_mtDNA()
+			logger.info(f"mtDNA was successfully downloaded for {organism_name}")
+			logger.info(f"gDNA is being downloaded for {organism_name}")
+			NUMT_class.get_gDNA(assembly_summary=assembly_summary)
+			logger.info(f"gDNA was successfully downloaded for {organism_name}")
+			logger.info("LAST alignment is in progress")
+			NUMT_class.LASTALignment()
+			logger.info(f"LAST alignment has been successfully finished for {organism_name}")
+			NUMT_class.process_alignment()
+	else:
+		NUMT_class=NUMT_finder(organism_name=organism_names,out_path=args.out_path,settings=lastal_settings,assembly_summary=assembly_summary)
+		logger.info(f"mtDNA is being downloaded for {organism_names}")
 		NUMT_class.get_mtDNA()
-		NUMT_class.get_gDNA()
+		logger.info(f"mtDNA was successfully downloaded for {organism_names}")
+		logger.info(f"gDNA is being downloaded for {organism_names}")
+		NUMT_class.get_gDNA(assembly_summary=assembly_summary)
+		logger.info(f"gDNA was successfully downloaded for {organism_names}")
+		logger.info("LAST alignment is in progress")
 		NUMT_class.LASTALignment()
+		logger.info(f"LAST alignment has been successfully finished for {organism_names}")
 		NUMT_class.process_alignment()
-else:
-	NUMT_class=NUMT_finder(organism_names)
-	NUMT_class.get_mtDNA()
-	NUMT_class.get_gDNA()
-	NUMT_class.LASTALignment()
-	NUMT_class.process_alignment()
+	end_time=time.time()
+	logger.info(f"Pipeline completed in {end_time-start_time:.2f} seconds")
+	logger.info(f"Results saved to {args.out_path}")
+
+if __name__=="__main__":
+	main()
